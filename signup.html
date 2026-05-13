@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Signup</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div class="auth-container">
+      <div class="auth-box">
+        <h2>Sign Up</h2>
+
+        <form id="signupForm">
+          <input type="email" placeholder="Email" id="email" required />
+          <input
+            type="password"
+            placeholder="Password"
+            id="password"
+            required
+          />
+          <button type="submit">Sign Up</button>
+        </form>
+
+        <p>Already have an account? <a href="login.html">Login</a></p>
+      </div>
+    </div>
+
+    <script type="module">
+      import { supabase } from './supabase.js';
+
+      // Check if user is already logged in
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (user) {
+        window.location.href = 'dashboard.html';
+      }
+
+      const form = document.getElementById('signupForm');
+
+      form.addEventListener('submit', async e => {
+        e.preventDefault();
+
+        const email = document.getElementById('email').value.trim();
+        const password = document.getElementById('password').value;
+
+        console.log('📨 Attempting signup with:', { email, password });
+
+        const { data, error } = await supabase.auth.signUp({ email, password });
+
+        console.log('✅ Signup response:', data);
+        console.log('❌ Signup error:', error);
+
+        if (error) {
+          alert('Signup failed: ' + error.message);
+          return;
+        }
+
+        // Store user info if signup includes automatic login
+        if (data.user) {
+          localStorage.setItem('user', JSON.stringify(data.user));
+        }
+
+        alert('Your account has been created successfully.');
+        window.location.href = 'login.html';
+      });
+    </script>
+  </body>
+</html>

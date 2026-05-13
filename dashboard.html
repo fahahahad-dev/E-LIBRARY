@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dashboard</title>
+  <link rel="stylesheet" href="dashboard.css" />
+</head>
+
+<body>
+  <!-- Header -->
+  <div class="header">
+    <h1>📚 My Books</h1>
+    <button class="action-btn red" id="logoutBtn">Logout</button>
+  </div>
+
+  <!-- Dashboard Content -->
+  <div class="dashboard">
+    <div class="books">
+
+    </div>
+
+    <script type="module">
+      import { supabase } from "./supabase.js";
+      (async () => {
+        const storedUser = localStorage.getItem("user");
+        if (!storedUser) {
+          // If not in localStorage, check Supabase session
+          const { data, error } = await supabase.auth.getSession();
+          if (!data.session) {
+            window.location.href = "login.html";
+            return;
+          }
+          const { data: userData } = await supabase.auth.getUser();
+          if (userData.user) {
+            localStorage.setItem("user", JSON.stringify(userData.user));
+          }
+        }
+      })();
+
+      // Logout button
+      document
+        .getElementById("logoutBtn")
+        .addEventListener("click", async () => {
+          await supabase.auth.signOut();
+          localStorage.removeItem("user");
+          window.location.href = "login.html";
+        });
+
+      // Load and render books
+      async function loadBooks() {
+        const { data, error } = await supabase
+          .from("books")
+          .select("*")
+          .order("title");
+        if (error) {
+          console.error("Books load error:", error);
+          return;
+        }
+
+        const container = document.querySelector(".books");
+        container.innerHTML = "";
+
+        data.forEach((book) => {
+          const div = document.createElement("div");
+          div.className = "book";
+          div.innerHTML = `
+         <img src="${book.cover_url}" alt="${book.title}" />
+         <p>📘 ${book.title}</p>`;
+          div.onclick = () => (window.location.href = "main.html?id=" + book.id);
+          container.appendChild(div);
+        });
+      }
+
+      loadBooks();
+
+      // Attach click events to static books (if they exist)
+      document.querySelectorAll(".book").forEach((book) => {
+        book.addEventListener("click", () => {
+          const file = book.getAttribute("data-file");
+          if (file) {
+            window.location.href = "main.html?file=" + file;
+          }
+        });
+      });
+    </script>
+</body>
+
+</html>

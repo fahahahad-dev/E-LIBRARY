@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PDF Annotator</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <link rel="stylesheet" href="style.css" />
+</head>
+
+<body>
+  <div class="app-container">
+
+    <!-- Header -->
+    <div class="header">
+      <h1>📑 PDF Highlighter & Annotation Tool</h1>
+      <div class="header-controls">
+        <label class="upload-btn" id="uploadLabel">
+          📁 Upload PDF
+          <input type="file" accept="application/pdf" id="fileInput" class="file-input" />
+        </label>
+        <button class="action-btn" id="resetBtn" style="display: none">
+          🔄 New File
+        </button>
+        <div class="page-controls" id="pageControls" style="display: none">
+          <button class="nav-btn" id="prevBtn">← Previous</button>
+          <span class="page-info" id="pageInfo">Page 1 of 1</span>
+          <button class="nav-btn" id="nextBtn">Next →</button>
+        </div>
+      </div>
+      <button onclick="window.location.href='dashboard.html'" class="action-btn"
+        style="position: absolute; top: 10px; right: 10px;">
+        ⬅ Back
+      </button>
+
+      <div class="selection-toolbar" id="selectionToolbar" style="display: none">
+        <div class="selection-text" id="selectionText"></div>
+        <div class="selection-buttons">
+          <button class="action-btn yellow" id="highlightYellow">
+            🟡 Yellow
+          </button>
+          <button class="action-btn green" id="highlightGreen">
+            🟢 Green
+          </button>
+          <button class="action-btn pink" id="highlightPink">🌸 Pink</button>
+          <button class="action-btn" id="addNoteBtn">📝 Add Note</button>
+          <button id="readAloudBtn">🔊 Read</button>
+          <button class="action-btn red" id="cancelSelection">
+            ❌ Cancel
+          </button>
+        </div>
+        <div class="annotation-input" id="annotationInput" style="display: none">
+          <input type="text" placeholder="Enter your note..." id="noteInput" />
+          <button class="action-btn green" id="saveNote">💾 Save</button>
+          <button class="action-btn red" id="cancelNote">❌ Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="main-content">
+      <!-- PDF Viewer -->
+      <div class="pdf-viewer">
+        <div class="pdf-canvas-container scrollbar" id="pdfContainer">
+          <div class="drag-drop-area" id="dropArea">
+            <div class="empty-state-icon">📄</div>
+            <h2>Drop your PDF here or click to upload</h2>
+            <p>Support for highlights, annotations, and notes</p>
+          </div>
+          <div id="pageContainer" style="display: none; position: relative">
+            <canvas id="pdf-canvas"></canvas>
+            <div id="textLayer" class="textLayer"></div>
+            <div id="highlightLayer"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Sidebar -->
+      <div class="sidebar">
+        <div class="sidebar-header">
+          <h3>📋 Annotations & Notes</h3>
+        </div>
+        <div class="sidebar-content scrollbar" id="sidebarContent">
+          <div class="empty-state">
+            <div class="empty-state-icon">📝</div>
+            <p>Select text in the PDF to add highlights and notes</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script src="utils.js"></script>
+  <script src="globals.js"></script>
+  <script src="tts.js"></script>
+  <script src="pdfRenderer.js"></script>
+  <script src="selection.js"></script>
+  <script src="ui.js"></script>
+  <script src="main.js"></script>
+
+  <script type="module">
+    import { supabase } from "./supabase.js";
+
+    const qs = new URLSearchParams(window.location.search);
+    const bookId = qs.get("id");
+
+    async function getUserId() {
+      const { data } = await supabase.auth.getUser();
+      return data.user?.id || null;
+    }
+
+    // Load PDF file_url from DB and render
+    async function loadBookAndRender() {
+      if (!bookId) return;
+
+      const uid = await getUserId();
+      if (!uid) {
+        window.location.href = "index.html";
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from("books")
+        .select("title, file_url, lang")
+        .eq("id", bookId)
+        .single();
+
+      if (error) {
+        console.error("Error loading book:", error);
+        alert("Could not load this book.");
+        return;
+      }
+
+      // Set the language using the new function
+      if (data.lang) {
+        window.setBookLanguage(data.lang);
+        console.log("Setting book language to:", data.lang);
+      }
+
+      const titleEl = document.getElementById("bookTitle");
+      if (titleEl) titleEl.textContent = data.title;
+
+      const res = await fetch(data.file_url);
+      const buf = await res.arrayBuffer();
+      loadPDF(new Uint8Array(buf));
+
+      const pc = document.getElementById("pageControls");
+      const rb = document.getElementById("resetBtn");
+      const da = document.getElementById("dropArea");
+      const pg = document.getElementById("pageContainer");
+      if (pc) pc.style.display = "flex";
+      if (rb) rb.style.display = "block";
+      if (da) da.style.display = "none";
+      if (pg) pg.style.display = "block";
+    }
+
+    // SAVE annotation to database
+    window.saveAnnotationToDB = async function (item) {
+      const uid = await getUserId();
+      if (!uid || !bookId) return;
+
+      const payload = {
+        user_id: uid,
+        book_id: bookId,
+        page: item.page,
+        selected_text: item.text || null,
+        annotation_text: item.annotation || null,
+        color: item.color,
+        type: item.type,
+        rects: JSON.stringify(item.rects), // Store coordinates as JSON
+      };
+
+      const { data, error } = await supabase
+        .from("annotation_new")
+        .insert(payload)
+        .select()
+        .single();
+
+      if (error) {
+        console.error("Save annotation error:", error);
+        return;
+      }
+
+      // Update the local item with the database ID
+      item.dbId = data.id;
+      console.log("Annotation saved with ID:", data.id);
+    };
+
+    // LOAD annotations from database
+    // LOAD annotations from database - CORRECTED VERSION
+    window.loadAnnotationsFromDB = async function () {
+      const uid = await getUserId();
+      if (!uid || !bookId) return;
+
+      const { data, error } = await supabase
+        .from("annotation_new")
+        .select("*")
+        .eq("user_id", uid)
+        .eq("book_id", bookId)
+        .order("created_at", { ascending: true });
+
+      if (error) {
+        console.error("Load annotations error:", error);
+        return;
+      }
+
+      // Clear existing annotations - Use the correct variable references
+      highlights.length = 0; // Clear array but keep reference
+      annotations.length = 0; // Clear array but keep reference
+
+      // Process loaded data
+      data.forEach((dbItem, index) => {
+        const item = {
+          id: index + 1, // Local ID for UI
+          dbId: dbItem.id, // Database ID for deletion
+          text: dbItem.selected_text,
+          annotation: dbItem.annotation_text,
+          color: dbItem.color,
+          type: dbItem.type,
+          page: dbItem.page,
+          rects:
+            typeof dbItem.rects === "string"
+              ? JSON.parse(dbItem.rects)
+              : dbItem.rects,
+        };
+
+        if (item.type === "highlight") {
+          highlights.push(item); // Use local variable, not window.highlights
+        } else if (item.type === "annotation") {
+          annotations.push(item); // Use local variable, not window.annotations
+        }
+      });
+
+      // Update the counter to avoid ID conflicts
+      annotationIdCounter = data.length + 1; // Use local variable
+
+      // Re-render annotations with proper viewport
+      if (pdfDoc) {
+        pdfDoc
+          .getPage(pageNum)
+          .then(function (page) {
+            const viewport = page.getViewport({ scale: scale });
+            renderHighlights(viewport); // Pass viewport parameter
+            updateSidebar();
+            console.log("Loaded and rendered annotations:", data.length);
+          })
+          .catch((error) => {
+            console.error(
+              "Error getting page for annotation rendering:",
+              error
+            );
+            // Fallback: try to render without viewport (might work for some cases)
+            renderHighlights();
+            updateSidebar();
+            console.log("Loaded annotations (fallback render):", data.length);
+          });
+      } else {
+        // If PDF not loaded yet, just update the data and sidebar
+        updateSidebar();
+        console.log(
+          "Loaded annotations (PDF not ready for rendering):",
+          data.length
+        );
+      }
+    };
+
+    // DELETE annotation from database
+    window.deleteAnnotationFromDB = async function (item) {
+      if (!item.dbId) {
+        console.warn("No database ID found for annotation");
+        return;
+      }
+
+      const { error } = await supabase
+        .from("annotation_new")
+        .delete()
+        .eq("id", item.dbId);
+
+      if (error) {
+        console.error("Delete annotation error:", error);
+      } else {
+        console.log("Annotation deleted from database:", item.dbId);
+      }
+    };
+
+    // Initialize the app
+    window.addEventListener("load", async () => {
+      await loadBookAndRender();
+      // Small delay to ensure PDF is loaded before loading annotations
+      setTimeout(async () => {
+        await window.loadAnnotationsFromDB();
+      }, 1000);
+    });
+  </script>
+</body>
+
+</html>
